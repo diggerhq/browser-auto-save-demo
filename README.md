@@ -34,3 +34,36 @@ enabled. For dev Browser API testing, set `OPENCOMPUTER_BROWSER_API_URL`.
 There is no `Save Auth` button. The important implementation detail is that
 the managed browser must be deleted or allowed to time out; closing only a
 Playwright page/browser is not enough to persist the profile.
+
+## Headless Gmail Challenge Screenshot Test
+
+This repo also includes a deliberately best-effort Gmail web-UI send test. It
+uses a saved profile in headless mode, attempts to compose and send one email,
+and writes screenshots/HTML/logs when Google shows sign-in, captcha, or account
+security friction.
+
+Configure `.env`:
+
+```bash
+OPENCOMPUTER_API_KEY=osb_...
+GMAIL_PROFILE_NAME=scout-digger:sgp_test:684a2b2ca18a1424:google
+GMAIL_TO=mo@digger.dev
+GMAIL_SUBJECT=Hi Mo!
+GMAIL_BODY=Who are you rooting for in the World Cup?
+```
+
+Run:
+
+```bash
+npm run gmail:headless
+```
+
+Artifacts are written to `artifacts/gmail-headless/` by default:
+
+- `events.json` with page URLs, titles, challenge detection, and browser lifecycle
+- `*.png` screenshot at the challenge or send-complete point
+- `*.html` page HTML next to the screenshot
+
+This is for debugging and screenshots, not the recommended production Gmail
+sending path. Gmail web automation can be challenged even with a valid saved
+profile. Reliable sending should use Gmail API OAuth or Workspace delegation.

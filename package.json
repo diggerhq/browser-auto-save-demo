@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
+    "gmail:headless": "tsx src/gmail-headless-send.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
