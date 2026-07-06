@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Browser save_changes demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #fff;
+      --ink: #151922;
+      --muted: #606a78;
+      --line: #d9e0ea;
+      --accent: #1769e0;
+      --danger: #a61b1b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      padding: 22px 28px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    p { margin: 0; color: var(--muted); }
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 460px) minmax(0, 1fr);
+      gap: 18px;
+      padding: 18px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    button {
+      border: 0;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 650;
+      padding: 10px 12px;
+    }
+    button.secondary {
+      background: #eef2f7;
+      color: #1f2937;
+      border: 1px solid var(--line);
+    }
+    button.danger { background: var(--danger); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .note {
+      margin: 0 0 14px;
+      padding: 10px;
+      border: 1px solid #f0c878;
+      background: #fff8e8;
+      color: #664913;
+      border-radius: 6px;
+    }
+    .status {
+      margin-top: 14px;
+      min-height: 22px;
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: 140px minmax(0, 1fr);
+      gap: 8px 12px;
+      overflow-wrap: anywhere;
+      color: var(--muted);
+    }
+    .kv strong { color: var(--ink); }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+    @media (max-width: 840px) {
+      main { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Browser save_changes demo</h1>
+    <p>Headless profile persistence without a Save Auth button.</p>
+  </header>
+
+  <main>
+    <section>
+      <h2>Run</h2>
+      <div class="note">
+        Start creates a headless Browser Session with <code>profile.saveChanges: true</code>.
+        Closing this local tab automatically calls the server, and the server deletes
+        the managed browser so the profile is saved.
+      </div>
+      <div class="actions">
+        <button id="startBtn">Start Headless Session</button>
+        <button id="verifyBtn" class="secondary">Verify Saved Profile</button>
+        <button id="endBtn" class="danger" disabled>End Session</button>
+      </div>
+      <div id="status" class="status"></div>
+    </section>
+
+    <section>
+      <h2>Session</h2>
+      <div id="meta" class="kv"></div>
+    </section>
+  </main>
+
+  <script>
+    const startBtn = document.getElementById("startBtn");
+    const verifyBtn = document.getElementById("verifyBtn");
+    const endBtn = document.getElementById("endBtn");
+    const statusEl = document.getElementById("status");
+    const metaEl = document.getElementById("meta");
+
+    let currentBrowserId = null;
+    let closeSent = false;
+
+    function setStatus(value) {
+      statusEl.textContent = value;
+    }
+
+    function setMeta(rows) {
+      metaEl.innerHTML = rows.map(([key, value]) => (
+        `<strong>${escapeHtml(key)}</strong><span>${escapeHtml(String(value ?? ""))}</span>`
+      )).join("");
+    }
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[ch]));
+    }
+
+    async function post(path, body = {}) {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || JSON.stringify(json));
+      return json;
+    }
+
+    async function start() {
+      setStatus("Starting headless Browser Session...");
+      startBtn.disabled = true;
+      try {
+        const data = await post("/api/start");
+        currentBrowserId = data.browser.id;
+        closeSent = false;
+        endBtn.disabled = false;
+        setMeta([
+          ["Browser", data.browser.id],
+          ["Headless", data.browser.headless],
+          ["Profile", data.profile.name || data.profile.id],
+          ["Marker", data.marker],
+          ["Close behavior", data.closeBehavior]
+        ]);
+        setStatus("Marker written. Close this local tab to trigger automatic profile save, then reopen and verify.");
+      } catch (err) {
+        startBtn.disabled = false;
+        setStatus(err.message || String(err));
+      }
+    }
+
+    async function endSession() {
+      if (!currentBrowserId || closeSent) return;
+      closeSent = true;
+      const browserId = currentBrowserId;
+      currentBrowserId = null;
+      endBtn.disabled = true;
+      setStatus("Deleting managed browser to trigger profile save...");
+      const data = await post("/api/close", { browserId });
+      setStatus(data.deleted ? "Managed browser deleted. Profile save was triggered." : "Browser was already gone.");
+      startBtn.disabled = false;
+    }
+
+    async function verify() {
+      setStatus("Opening a fresh headless browser with the same profile...");
+      verifyBtn.disabled = true;
+      try {
+        const data = await post("/api/verify");
+        setMeta([
+          ["Profile", data.profile.name || data.profile.id],
+          ["Marker key", data.markerKey],
+          ["Restored value", data.restored || "(none)"],
+          ["Result", data.ok ? "profile state restored" : "no saved marker found"]
+        ]);
+        setStatus(data.ok ? "Verified: saved profile state loaded in a new browser." : "No saved profile state found yet.");
+      } catch (err) {
+        setStatus(err.message || String(err));
+      } finally {
+        verifyBtn.disabled = false;
+      }
+    }
+
+    function closeOnPageHide() {
+      if (!currentBrowserId || closeSent) return;
+      closeSent = true;
+      const body = JSON.stringify({ browserId: currentBrowserId });
+      currentBrowserId = null;
+
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon("/api/close", new Blob([body], { type: "application/json" }));
+        return;
+      }
+
+      fetch("/api/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        keepalive: true
+      }).catch(() => {});
+    }
+
+    startBtn.addEventListener("click", start);
+    endBtn.addEventListener("click", () => endSession().catch((err) => setStatus(err.message || String(err))));
+    verifyBtn.addEventListener("click", verify);
+    window.addEventListener("pagehide", closeOnPageHide);
+    window.addEventListener("beforeunload", closeOnPageHide);
+  </script>
+</body>
+</html>
