@@ -254,6 +254,10 @@ function createCrashGuard(page: Page): CrashGuard {
   const crashPromise = new Promise<never>((_, reject) => {
     rejectCrash = reject;
   });
+  // The page may crash while the script is between awaited Playwright calls.
+  // Keep Node from treating that stored rejection as uncaught; active waits
+  // still observe the original promise through Promise.race below.
+  crashPromise.catch(() => undefined);
 
   page.on("crash", () => {
     crashed = true;
