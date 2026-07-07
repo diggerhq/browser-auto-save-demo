@@ -11,6 +11,11 @@ type LogEvent = {
   [key: string]: unknown;
 };
 
+type CrashGuard = {
+  crashed: boolean;
+  wait<T>(label: string, promise: Promise<T>): Promise<T>;
+};
+
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const rootDir = join(__dirname, "..");
 loadDotEnv(join(rootDir, ".env"));
@@ -51,47 +56,54 @@ async function main() {
 
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   let page: Page | null = null;
+  let pageCrashed = false;
   let finalStatus = "unknown";
 
   try {
     pwBrowser = await chromium.connectOverCDP(browser.cdpWsUrl);
     const context = pwBrowser.contexts()[0] || await pwBrowser.newContext();
     page = context.pages()[0] || await context.newPage();
-    page.on("crash", () => log("page_crash", { url: page?.url() || "" }));
+    const crashGuard = createCrashGuard(page);
 
     await inspect(page, "initial");
-    await captureStep(page, "01-initial");
-    await page.goto("https://mail.google.com/mail/u/0/#inbox", { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await captureStep(page, "01-initial", crashGuard);
+    await crashGuard.wait(
+      "goto_inbox",
+      page.goto("https://mail.google.com/mail/u/0/#inbox", { waitUntil: "domcontentloaded", timeout: 60_000 }),
+    );
     await inspect(page, "after_goto_inbox");
-    await captureStep(page, "02-after-goto-inbox");
-    await page.waitForTimeout(5_000);
+    await captureStep(page, "02-after-goto-inbox", crashGuard);
+    await crashGuard.wait("initial_settle", page.waitForTimeout(5_000));
     await inspect(page, "after_initial_settle");
-    await captureStep(page, "03-after-initial-settle");
+    await captureStep(page, "03-after-initial-settle", crashGuard);
 
-    const challenge = await detectGoogleFriction(page);
+    const challenge = await detectGoogleFriction(page, crashGuard);
     if (challenge.detected) {
       finalStatus = "blocked_by_google_challenge";
-      await capture(page, "google-challenge", challenge);
+      await capture(page, "google-challenge", challenge, crashGuard);
       return;
     }
 
-    await composeAndSend(page);
+    await composeAndSend(page, crashGuard);
     await inspect(page, "after_send_attempt");
 
-    const postSendChallenge = await detectGoogleFriction(page);
+    const postSendChallenge = await detectGoogleFriction(page, crashGuard);
     if (postSendChallenge.detected) {
       finalStatus = "blocked_by_google_challenge_after_send";
-      await capture(page, "google-challenge-after-send", postSendChallenge);
+      await capture(page, "google-challenge-after-send", postSendChallenge, crashGuard);
       return;
     }
 
     finalStatus = "send_attempt_completed";
-    await capture(page, "send-attempt-completed", { note: "No challenge detected after send attempt." });
+    await capture(page, "send-attempt-completed", { note: "No challenge detected after send attempt." }, crashGuard);
   } catch (err) {
     finalStatus = "error";
+    pageCrashed = err instanceof Error && err.message.includes("crashed");
     log("error", { message: err instanceof Error ? err.message : String(err) });
-    if (page) {
+    if (page && !pageCrashed) {
       await capture(page, "error", { message: err instanceof Error ? err.message : String(err) }).catch(() => undefined);
+    } else if (pageCrashed) {
+      log("artifact_skipped", { label: "error", reason: "page crashed before screenshot/html capture" });
     }
     throw err;
   } finally {
@@ -106,50 +118,59 @@ async function main() {
   }
 }
 
-async function composeAndSend(page: Page) {
+async function composeAndSend(page: Page, crashGuard: CrashGuard) {
   log("send_step", { step: "waiting_for_gmail_controls" });
-  await captureStep(page, "04-before-waiting-for-gmail-controls");
-  await page.waitForSelector("a, button, input, textarea, [role='button']", { state: "attached", timeout: 30_000 });
-  await captureStep(page, "05-after-gmail-controls-attached");
+  await captureStep(page, "04-before-waiting-for-gmail-controls", crashGuard);
+  await crashGuard.wait(
+    "wait_for_gmail_controls",
+    page.waitForSelector("a, button, input, textarea, [role='button']", { state: "attached", timeout: 30_000 }),
+  );
+  await captureStep(page, "05-after-gmail-controls-attached", crashGuard);
 
   const composeButton = page.getByRole("button", { name: /^Compose$/i }).first();
-  if (await composeButton.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await composeButton.click({ timeout: 10_000 });
+  if (await crashGuard.wait("compose_visible", composeButton.isVisible({ timeout: 10_000 }).catch(() => false))) {
+    await crashGuard.wait("compose_click", composeButton.click({ timeout: 10_000 }));
   } else {
-    await page.locator("div[role='button'][gh='cm'], .T-I.T-I-KE").first().click({ timeout: 10_000 });
+    await crashGuard.wait(
+      "compose_fallback_click",
+      page.locator("div[role='button'][gh='cm'], .T-I.T-I-KE").first().click({ timeout: 10_000 }),
+    );
   }
   log("send_step", { step: "compose_opened" });
-  await captureStep(page, "06-compose-clicked");
+  await captureStep(page, "06-compose-clicked", crashGuard);
 
   const dialog = page.locator("div[role='dialog']").last();
-  await dialog.waitFor({ state: "visible", timeout: 15_000 }).catch(() => undefined);
-  await captureStep(page, "07-compose-dialog-visible");
+  await crashGuard.wait("compose_dialog_visible", dialog.waitFor({ state: "visible", timeout: 15_000 }).catch(() => undefined));
+  await captureStep(page, "07-compose-dialog-visible", crashGuard);
 
   const toField = page.locator(
     "textarea[name='to'], input[aria-label*='To recipients' i], textarea[aria-label*='To' i], input[aria-label*='Recipients' i]"
   ).last();
-  await toField.fill(to, { timeout: 15_000 });
-  await page.keyboard.press("Enter").catch(() => undefined);
+  await crashGuard.wait("fill_to", toField.fill(to, { timeout: 15_000 }));
+  await crashGuard.wait("press_to_enter", page.keyboard.press("Enter").catch(() => undefined));
 
-  await page.locator("input[name='subjectbox']").last().fill(subject, { timeout: 15_000 });
+  await crashGuard.wait("fill_subject", page.locator("input[name='subjectbox']").last().fill(subject, { timeout: 15_000 }));
 
   const bodyField = page.locator(
     "div[aria-label='Message Body'][contenteditable='true'], div[role='textbox'][contenteditable='true']"
   ).last();
-  await bodyField.click({ timeout: 15_000 });
-  await bodyField.fill(body, { timeout: 15_000 });
+  await crashGuard.wait("body_click", bodyField.click({ timeout: 15_000 }));
+  await crashGuard.wait("fill_body", bodyField.fill(body, { timeout: 15_000 }));
   log("send_step", { step: "draft_filled" });
-  await captureStep(page, "08-draft-filled");
+  await captureStep(page, "08-draft-filled", crashGuard);
 
   try {
-    await page.getByRole("button", { name: /^Send$/i }).last().click({ timeout: 10_000 });
+    await crashGuard.wait("send_click", page.getByRole("button", { name: /^Send$/i }).last().click({ timeout: 10_000 }));
   } catch {
-    await page.locator("div[role='button'][aria-label^='Send'], div[data-tooltip^='Send']").last().click({ timeout: 10_000 });
+    await crashGuard.wait(
+      "send_fallback_click",
+      page.locator("div[role='button'][aria-label^='Send'], div[data-tooltip^='Send']").last().click({ timeout: 10_000 }),
+    );
   }
   log("send_step", { step: "send_clicked" });
-  await captureStep(page, "09-send-clicked");
-  await page.waitForTimeout(5_000);
-  await captureStep(page, "10-after-send-settle");
+  await captureStep(page, "09-send-clicked", crashGuard);
+  await crashGuard.wait("after_send_settle", page.waitForTimeout(5_000));
+  await captureStep(page, "10-after-send-settle", crashGuard);
 }
 
 async function inspect(page: Page, note: string) {
@@ -160,8 +181,8 @@ async function inspect(page: Page, note: string) {
   });
 }
 
-async function detectGoogleFriction(page: Page) {
-  const result = await page.evaluate(() => {
+async function detectGoogleFriction(page: Page, crashGuard: CrashGuard) {
+  const result = await crashGuard.wait("detect_google_friction", page.evaluate(() => {
     const text = document.body?.innerText || "";
     const url = location.href;
     const title = document.title;
@@ -188,21 +209,26 @@ async function detectGoogleFriction(page: Page) {
       title,
       textSample: text.replace(/\s+/g, " ").slice(0, 1200),
     };
-  });
+  }));
   log("friction_check", result);
   return result;
 }
 
-async function capture(page: Page, label: string, extra: Record<string, unknown>) {
+async function capture(page: Page, label: string, extra: Record<string, unknown>, crashGuard?: CrashGuard) {
+  if (crashGuard?.crashed) {
+    log("artifact_skipped", { label, reason: "page crashed before screenshot/html capture" });
+    return;
+  }
+
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const base = `${stamp}-${label}`;
   const screenshotPath = join(artifactDir, `${base}.png`);
   const htmlPath = join(artifactDir, `${base}.html`);
 
-  await page.screenshot({ path: screenshotPath, fullPage: true }).catch((err) => {
+  await withTimeout(page.screenshot({ path: screenshotPath, fullPage: true, timeout: 10_000 }), 12_000, `screenshot:${label}`).catch((err) => {
     log("screenshot_error", { label, message: String(err) });
   });
-  await writeFile(htmlPath, await page.content(), "utf8").catch((err) => {
+  await withTimeout(page.content(), 8_000, `html:${label}`).then((html) => writeFile(htmlPath, html, "utf8")).catch((err) => {
     log("html_error", { label, message: String(err) });
   });
 
@@ -214,12 +240,54 @@ async function capture(page: Page, label: string, extra: Record<string, unknown>
   });
 }
 
-async function captureStep(page: Page, label: string) {
+async function captureStep(page: Page, label: string, crashGuard: CrashGuard) {
   await capture(page, label, {
     step: true,
     url: page.url(),
     title: await page.title().catch(() => ""),
+  }, crashGuard);
+}
+
+function createCrashGuard(page: Page): CrashGuard {
+  let crashed = false;
+  let rejectCrash: (err: Error) => void = () => undefined;
+  const crashPromise = new Promise<never>((_, reject) => {
+    rejectCrash = reject;
   });
+
+  page.on("crash", () => {
+    crashed = true;
+    const url = safePageUrl(page);
+    log("page_crash", { url });
+    rejectCrash(new Error(`Page crashed while running Gmail headless flow at ${url}`));
+  });
+
+  return {
+    get crashed() {
+      return crashed;
+    },
+    wait<T>(label: string, promise: Promise<T>) {
+      if (crashed) {
+        return Promise.reject(new Error(`Page already crashed before ${label}`));
+      }
+      return Promise.race([promise, crashPromise]);
+    },
+  };
+}
+
+function safePageUrl(page: Page) {
+  try {
+    return page.url();
+  } catch {
+    return "";
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
 }
 
 async function writeArtifacts() {
