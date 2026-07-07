@@ -52,6 +52,8 @@ GMAIL_SUBJECT=Hi Mo!
 GMAIL_BODY=Who are you rooting for in the World Cup?
 # Optional: use Gmail's basic HTML UI instead of the heavier JS UI.
 GMAIL_MODE=html
+# Optional: send experimental raw create fields to ask the provider not to restore saved tabs.
+GMAIL_DISABLE_RESTORE_TABS=1
 # Optional: start a blank browser first, then attach the profile to avoid restored Gmail tabs.
 GMAIL_ATTACH_PROFILE_AFTER_START=1
 ```
@@ -79,6 +81,18 @@ GMAIL_MODE=html GMAIL_ATTACH_PROFILE_AFTER_START=1 npm run gmail:headless
 This uses the Browser API update route. If that route is unavailable in the
 current environment, the script fails early with the HTTP response so the
 limitation is explicit.
+
+To test whether the Browser API accepts an explicit no-restore-tabs create
+option, run:
+
+```bash
+GMAIL_MODE=html GMAIL_DISABLE_RESTORE_TABS=1 GMAIL_PROFILE_NAME=gmail-demo GMAIL_TO=mo@digger.dev npm run gmail:headless
+```
+
+This intentionally bypasses the SDK body mapper and sends experimental raw
+fields: `restore_tabs: false`, `clear_restored_tabs: true`, and
+`restore_session: false`. If the API rejects unknown fields, the script prints
+the exact HTTP response.
 
 You can also try repairing the profile's restored tabs by loading the profile,
 opening a lightweight Gmail URL, closing any restored tabs, and deleting the

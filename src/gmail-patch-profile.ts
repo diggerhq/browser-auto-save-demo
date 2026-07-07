@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Browser, BrowserProfile } from "@opencomputer/sdk";
 import { chromium, type Page } from "playwright";
+import { createBrowserRaw } from "./browser-raw.js";
 
 type LogEvent = {
   timestamp: string;
@@ -18,32 +19,56 @@ loadDotEnv(join(rootDir, ".env"));
 const profileName = requiredEnv("GMAIL_PROFILE_NAME");
 const patchUrl = process.env.GMAIL_PATCH_URL || "https://mail.google.com/mail/u/0/h/";
 const artifactDir = process.env.GMAIL_PATCH_ARTIFACT_DIR || join(rootDir, "artifacts", "gmail-patch-profile");
+const disableRestoreTabs = process.env.GMAIL_DISABLE_RESTORE_TABS === "1";
 const events: LogEvent[] = [];
 
 async function main() {
   requiredEnv("OPENCOMPUTER_API_KEY");
   await mkdir(artifactDir, { recursive: true });
 
-  log("input", { profileName, patchUrl, artifactDir });
+  log("input", { profileName, patchUrl, artifactDir, disableRestoreTabs });
 
   const profile = await BrowserProfile.connect(profileName);
   log("profile", { id: profile.id, name: profile.name, providerProfileId: profile.providerProfileId });
 
-  const browser = await Browser.create({
+  const createBody = {
     headless: true,
     stealth: true,
-    timeoutSeconds: 180,
-    startUrl: patchUrl,
+    timeout_seconds: 180,
+    start_url: patchUrl,
     tags: { demo: "gmail-profile-patch" },
     profile: {
       id: profile.id,
-      saveChanges: true,
+      save_changes: true,
     },
-    chromePolicy: {
+    chrome_policy: {
       RestoreOnStartup: 4,
       RestoreOnStartupURLs: [patchUrl],
     },
-  });
+    ...(disableRestoreTabs ? {
+      restore_tabs: false,
+      clear_restored_tabs: true,
+      restore_session: false,
+    } : {}),
+  };
+  log("browser_create_body", createBody);
+  const browser = disableRestoreTabs
+    ? await createBrowserRaw(createBody)
+    : await Browser.create({
+      headless: true,
+      stealth: true,
+      timeoutSeconds: 180,
+      startUrl: patchUrl,
+      tags: { demo: "gmail-profile-patch" },
+      profile: {
+        id: profile.id,
+        saveChanges: true,
+      },
+      chromePolicy: {
+        RestoreOnStartup: 4,
+        RestoreOnStartupURLs: [patchUrl],
+      },
+    });
   log("browser_start", { id: browser.id, startUrl: patchUrl });
 
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;

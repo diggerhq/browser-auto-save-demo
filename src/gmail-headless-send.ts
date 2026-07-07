@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Browser, BrowserProfile } from "@opencomputer/sdk";
 import { chromium, type Page } from "playwright";
+import { createBrowserRaw, patchBrowserRaw } from "./browser-raw.js";
 
 type LogEvent = {
   timestamp: string;
@@ -33,13 +34,14 @@ const gmailTargetUrl = gmailMode === "html"
   ? "https://mail.google.com/mail/u/0/h/"
   : "https://mail.google.com/mail/u/0/#inbox";
 const attachProfileAfterStart = process.env.GMAIL_ATTACH_PROFILE_AFTER_START === "1";
+const disableRestoreTabs = process.env.GMAIL_DISABLE_RESTORE_TABS === "1";
 const events: LogEvent[] = [];
 
 async function main() {
   requiredEnv("OPENCOMPUTER_API_KEY");
   await mkdir(artifactDir, { recursive: true });
 
-  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl, attachProfileAfterStart });
+  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl, attachProfileAfterStart, disableRestoreTabs });
 
   const profile = await BrowserProfile.connect(profileName);
   log("profile", {
@@ -49,19 +51,40 @@ async function main() {
     providerLastUsedAt: profile.providerLastUsedAt,
   });
 
-  const browser = await Browser.create({
+  const createBody = {
     headless: true,
     stealth: true,
-    timeoutSeconds: 300,
-    startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
+    timeout_seconds: 300,
+    start_url: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
     tags: { demo: "gmail-headless-send" },
     ...(attachProfileAfterStart ? {} : {
       profile: {
         id: profile.id,
-        saveChanges: true,
+        save_changes: true,
       },
     }),
-  });
+    ...(disableRestoreTabs ? {
+      restore_tabs: false,
+      clear_restored_tabs: true,
+      restore_session: false,
+    } : {}),
+  };
+  log("browser_create_body", createBody);
+  const browser = disableRestoreTabs
+    ? await createBrowserRaw(createBody)
+    : await Browser.create({
+      headless: true,
+      stealth: true,
+      timeoutSeconds: 300,
+      startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
+      tags: { demo: "gmail-headless-send" },
+      ...(attachProfileAfterStart ? {} : {
+        profile: {
+          id: profile.id,
+          saveChanges: true,
+        },
+      }),
+    });
   log("browser_start", { id: browser.id, headless: browser.headless, startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl });
 
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
@@ -137,20 +160,8 @@ async function main() {
 }
 
 async function attachProfile(browserId: string, profileId: string) {
-  const apiUrl = (process.env.OPENCOMPUTER_BROWSER_API_URL || "https://browser.opencomputer.dev").replace(/\/+$/, "");
-  const apiKey = requiredEnv("OPENCOMPUTER_API_KEY");
   log("browser_update", { id: browserId, profileId, note: "attaching profile after blank browser start" });
-  const resp = await fetch(`${apiUrl}/v1/browsers/${encodeURIComponent(browserId)}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": apiKey,
-    },
-    body: JSON.stringify({ profile: { id: profileId, save_changes: true } }),
-  });
-  if (!resp.ok) {
-    throw new Error(`Failed to attach profile after start: ${resp.status} ${await resp.text()}`);
-  }
+  await patchBrowserRaw(browserId, { profile: { id: profileId, save_changes: true } });
   log("browser_update", { id: browserId, result: "profile_attached" });
 }
 
