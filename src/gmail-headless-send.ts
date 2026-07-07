@@ -50,18 +50,23 @@ async function main() {
   log("browser_start", { id: browser.id, headless: browser.headless, startUrl: "https://mail.google.com/" });
 
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
+  let page: Page | null = null;
   let finalStatus = "unknown";
 
   try {
     pwBrowser = await chromium.connectOverCDP(browser.cdpWsUrl);
     const context = pwBrowser.contexts()[0] || await pwBrowser.newContext();
-    const page = context.pages()[0] || await context.newPage();
+    page = context.pages()[0] || await context.newPage();
+    page.on("crash", () => log("page_crash", { url: page?.url() || "" }));
 
     await inspect(page, "initial");
+    await captureStep(page, "01-initial");
     await page.goto("https://mail.google.com/mail/u/0/#inbox", { waitUntil: "domcontentloaded", timeout: 60_000 });
     await inspect(page, "after_goto_inbox");
+    await captureStep(page, "02-after-goto-inbox");
     await page.waitForTimeout(5_000);
     await inspect(page, "after_initial_settle");
+    await captureStep(page, "03-after-initial-settle");
 
     const challenge = await detectGoogleFriction(page);
     if (challenge.detected) {
@@ -85,6 +90,9 @@ async function main() {
   } catch (err) {
     finalStatus = "error";
     log("error", { message: err instanceof Error ? err.message : String(err) });
+    if (page) {
+      await capture(page, "error", { message: err instanceof Error ? err.message : String(err) }).catch(() => undefined);
+    }
     throw err;
   } finally {
     if (pwBrowser) await pwBrowser.close().catch(() => undefined);
@@ -100,7 +108,9 @@ async function main() {
 
 async function composeAndSend(page: Page) {
   log("send_step", { step: "waiting_for_gmail_controls" });
-  await page.waitForSelector("a, button, input, textarea, [role='button']", { timeout: 30_000 });
+  await captureStep(page, "04-before-waiting-for-gmail-controls");
+  await page.waitForSelector("a, button, input, textarea, [role='button']", { state: "attached", timeout: 30_000 });
+  await captureStep(page, "05-after-gmail-controls-attached");
 
   const composeButton = page.getByRole("button", { name: /^Compose$/i }).first();
   if (await composeButton.isVisible({ timeout: 10_000 }).catch(() => false)) {
@@ -109,9 +119,11 @@ async function composeAndSend(page: Page) {
     await page.locator("div[role='button'][gh='cm'], .T-I.T-I-KE").first().click({ timeout: 10_000 });
   }
   log("send_step", { step: "compose_opened" });
+  await captureStep(page, "06-compose-clicked");
 
   const dialog = page.locator("div[role='dialog']").last();
   await dialog.waitFor({ state: "visible", timeout: 15_000 }).catch(() => undefined);
+  await captureStep(page, "07-compose-dialog-visible");
 
   const toField = page.locator(
     "textarea[name='to'], input[aria-label*='To recipients' i], textarea[aria-label*='To' i], input[aria-label*='Recipients' i]"
@@ -127,6 +139,7 @@ async function composeAndSend(page: Page) {
   await bodyField.click({ timeout: 15_000 });
   await bodyField.fill(body, { timeout: 15_000 });
   log("send_step", { step: "draft_filled" });
+  await captureStep(page, "08-draft-filled");
 
   try {
     await page.getByRole("button", { name: /^Send$/i }).last().click({ timeout: 10_000 });
@@ -134,7 +147,9 @@ async function composeAndSend(page: Page) {
     await page.locator("div[role='button'][aria-label^='Send'], div[data-tooltip^='Send']").last().click({ timeout: 10_000 });
   }
   log("send_step", { step: "send_clicked" });
+  await captureStep(page, "09-send-clicked");
   await page.waitForTimeout(5_000);
+  await captureStep(page, "10-after-send-settle");
 }
 
 async function inspect(page: Page, note: string) {
@@ -196,6 +211,14 @@ async function capture(page: Page, label: string, extra: Record<string, unknown>
     screenshotPath,
     htmlPath,
     ...extra,
+  });
+}
+
+async function captureStep(page: Page, label: string) {
+  await capture(page, label, {
+    step: true,
+    url: page.url(),
+    title: await page.title().catch(() => ""),
   });
 }
 
