@@ -27,9 +27,10 @@ const subject = process.env.GMAIL_SUBJECT || "Hello from OpenComputer";
 const body = process.env.GMAIL_BODY || "Testing a headless Gmail send from OpenComputer.";
 const artifactDir = process.env.GMAIL_ARTIFACT_DIR || join(rootDir, "artifacts", "gmail-headless");
 const gmailMode = process.env.GMAIL_MODE === "html" ? "html" : "standard";
-const gmailStartUrl = gmailMode === "html"
+const defaultGmailStartUrl = gmailMode === "html"
   ? "https://mail.google.com/mail/u/0/h/"
   : "https://mail.google.com/";
+const gmailStartUrl = process.env.GMAIL_START_URL || defaultGmailStartUrl;
 const gmailTargetUrl = gmailMode === "html"
   ? "https://mail.google.com/mail/u/0/h/"
   : "https://mail.google.com/mail/u/0/#inbox";

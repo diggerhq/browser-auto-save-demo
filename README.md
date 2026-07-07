@@ -52,6 +52,8 @@ GMAIL_SUBJECT=Hi Mo!
 GMAIL_BODY=Who are you rooting for in the World Cup?
 # Optional: use Gmail's basic HTML UI instead of the heavier JS UI.
 GMAIL_MODE=html
+# Optional: load the saved profile on a blank page before navigating to Gmail.
+GMAIL_START_URL=about:blank
 # Optional: send experimental raw create fields to ask the provider not to restore saved tabs.
 GMAIL_DISABLE_RESTORE_TABS=1
 # Optional: start a blank browser first, then attach the profile to avoid restored Gmail tabs.
@@ -93,6 +95,13 @@ This intentionally bypasses the SDK body mapper and sends experimental raw
 fields: `restore_tabs: false`, `clear_restored_tabs: true`, and
 `restore_session: false`. If the API rejects unknown fields, the script prints
 the exact HTTP response.
+
+To distinguish profile startup crashes from Gmail navigation crashes, start the
+profile on a blank page first:
+
+```bash
+GMAIL_START_URL=about:blank GMAIL_MODE=html GMAIL_PROFILE_NAME=gmail-demo GMAIL_TO=mo@digger.dev npm run gmail:headless
+```
 
 You can also try repairing the profile's restored tabs by loading the profile,
 opening a lightweight Gmail URL, closing any restored tabs, and deleting the
