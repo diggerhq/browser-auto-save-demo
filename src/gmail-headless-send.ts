@@ -271,13 +271,13 @@ function createCrashGuard(page: Page): CrashGuard {
       return crashed;
     },
     wait<T>(label: string, promise: Promise<T>) {
-      if (crashed) {
-        return Promise.reject(new Error(`Page already crashed before ${label}`));
-      }
       // If crashPromise wins the race, Playwright's original operation can
       // still reject later with "Page crashed". Mark that rejection observed so
       // Node does not surface it as an uncaught exception after cleanup starts.
       promise.catch(() => undefined);
+      if (crashed) {
+        return Promise.reject(new Error(`Page already crashed before ${label}`));
+      }
       return Promise.race([promise, crashPromise]);
     },
   };
