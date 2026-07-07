@@ -32,13 +32,14 @@ const gmailStartUrl = gmailMode === "html"
 const gmailTargetUrl = gmailMode === "html"
   ? "https://mail.google.com/mail/u/0/h/"
   : "https://mail.google.com/mail/u/0/#inbox";
+const attachProfileAfterStart = process.env.GMAIL_ATTACH_PROFILE_AFTER_START === "1";
 const events: LogEvent[] = [];
 
 async function main() {
   requiredEnv("OPENCOMPUTER_API_KEY");
   await mkdir(artifactDir, { recursive: true });
 
-  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl });
+  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl, attachProfileAfterStart });
 
   const profile = await BrowserProfile.connect(profileName);
   log("profile", {
@@ -52,14 +53,20 @@ async function main() {
     headless: true,
     stealth: true,
     timeoutSeconds: 300,
-    startUrl: gmailStartUrl,
+    startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
     tags: { demo: "gmail-headless-send" },
-    profile: {
-      id: profile.id,
-      saveChanges: true,
-    },
+    ...(attachProfileAfterStart ? {} : {
+      profile: {
+        id: profile.id,
+        saveChanges: true,
+      },
+    }),
   });
-  log("browser_start", { id: browser.id, headless: browser.headless, startUrl: gmailStartUrl });
+  log("browser_start", { id: browser.id, headless: browser.headless, startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl });
+
+  if (attachProfileAfterStart) {
+    await attachProfile(browser.id, profile.id);
+  }
 
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   let page: Page | null = null;
@@ -127,6 +134,24 @@ async function main() {
   if (finalStatus !== "send_attempt_completed") {
     process.exitCode = 2;
   }
+}
+
+async function attachProfile(browserId: string, profileId: string) {
+  const apiUrl = (process.env.OPENCOMPUTER_BROWSER_API_URL || "https://browser.opencomputer.dev").replace(/\/+$/, "");
+  const apiKey = requiredEnv("OPENCOMPUTER_API_KEY");
+  log("browser_update", { id: browserId, profileId, note: "attaching profile after blank browser start" });
+  const resp = await fetch(`${apiUrl}/v1/browsers/${encodeURIComponent(browserId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify({ profile: { id: profileId, save_changes: true } }),
+  });
+  if (!resp.ok) {
+    throw new Error(`Failed to attach profile after start: ${resp.status} ${await resp.text()}`);
+  }
+  log("browser_update", { id: browserId, result: "profile_attached" });
 }
 
 async function composeAndSendHtml(page: Page, crashGuard: CrashGuard) {

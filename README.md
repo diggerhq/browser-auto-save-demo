@@ -52,6 +52,8 @@ GMAIL_SUBJECT=Hi Mo!
 GMAIL_BODY=Who are you rooting for in the World Cup?
 # Optional: use Gmail's basic HTML UI instead of the heavier JS UI.
 GMAIL_MODE=html
+# Optional: start a blank browser first, then attach the profile to avoid restored Gmail tabs.
+GMAIL_ATTACH_PROFILE_AFTER_START=1
 ```
 
 Run:
@@ -66,6 +68,17 @@ try:
 ```bash
 GMAIL_MODE=html npm run gmail:headless
 ```
+
+If the saved profile restores a heavy Gmail inbox tab before the script can
+navigate, try starting blank and attaching the profile after browser creation:
+
+```bash
+GMAIL_MODE=html GMAIL_ATTACH_PROFILE_AFTER_START=1 npm run gmail:headless
+```
+
+This uses the Browser API update route. If that route is unavailable in the
+current environment, the script fails early with the HTTP response so the
+limitation is explicit.
 
 Artifacts are written to `artifacts/gmail-headless/` by default:
 
