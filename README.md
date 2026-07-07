@@ -50,12 +50,21 @@ GMAIL_PROFILE_NAME=scout-digger:sgp_test:684a2b2ca18a1424:google
 GMAIL_TO=mo@digger.dev
 GMAIL_SUBJECT=Hi Mo!
 GMAIL_BODY=Who are you rooting for in the World Cup?
+# Optional: use Gmail's basic HTML UI instead of the heavier JS UI.
+GMAIL_MODE=html
 ```
 
 Run:
 
 ```bash
 npm run gmail:headless
+```
+
+For accounts where the full Gmail JavaScript inbox crashes in headless mode,
+try:
+
+```bash
+GMAIL_MODE=html npm run gmail:headless
 ```
 
 Artifacts are written to `artifacts/gmail-headless/` by default:

@@ -25,13 +25,20 @@ const to = requiredEnv("GMAIL_TO");
 const subject = process.env.GMAIL_SUBJECT || "Hello from OpenComputer";
 const body = process.env.GMAIL_BODY || "Testing a headless Gmail send from OpenComputer.";
 const artifactDir = process.env.GMAIL_ARTIFACT_DIR || join(rootDir, "artifacts", "gmail-headless");
+const gmailMode = process.env.GMAIL_MODE === "html" ? "html" : "standard";
+const gmailStartUrl = gmailMode === "html"
+  ? "https://mail.google.com/mail/u/0/h/"
+  : "https://mail.google.com/";
+const gmailTargetUrl = gmailMode === "html"
+  ? "https://mail.google.com/mail/u/0/h/"
+  : "https://mail.google.com/mail/u/0/#inbox";
 const events: LogEvent[] = [];
 
 async function main() {
   requiredEnv("OPENCOMPUTER_API_KEY");
   await mkdir(artifactDir, { recursive: true });
 
-  log("input", { profileName, to, subject, artifactDir });
+  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl });
 
   const profile = await BrowserProfile.connect(profileName);
   log("profile", {
@@ -45,14 +52,14 @@ async function main() {
     headless: true,
     stealth: true,
     timeoutSeconds: 300,
-    startUrl: "https://mail.google.com/",
+    startUrl: gmailStartUrl,
     tags: { demo: "gmail-headless-send" },
     profile: {
       id: profile.id,
       saveChanges: true,
     },
   });
-  log("browser_start", { id: browser.id, headless: browser.headless, startUrl: "https://mail.google.com/" });
+  log("browser_start", { id: browser.id, headless: browser.headless, startUrl: gmailStartUrl });
 
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   let page: Page | null = null;
@@ -68,11 +75,11 @@ async function main() {
     await inspect(page, "initial");
     await captureStep(page, "01-initial", crashGuard);
     await crashGuard.wait(
-      "goto_inbox",
-      page.goto("https://mail.google.com/mail/u/0/#inbox", { waitUntil: "domcontentloaded", timeout: 60_000 }),
+      "goto_gmail_target",
+      page.goto(gmailTargetUrl, { waitUntil: "domcontentloaded", timeout: 60_000 }),
     );
-    await inspect(page, "after_goto_inbox");
-    await captureStep(page, "02-after-goto-inbox", crashGuard);
+    await inspect(page, "after_goto_gmail_target");
+    await captureStep(page, "02-after-goto-gmail-target", crashGuard);
     await crashGuard.wait("initial_settle", page.waitForTimeout(5_000));
     await inspect(page, "after_initial_settle");
     await captureStep(page, "03-after-initial-settle", crashGuard);
@@ -84,7 +91,11 @@ async function main() {
       return;
     }
 
-    await composeAndSend(page, crashGuard);
+    if (gmailMode === "html") {
+      await composeAndSendHtml(page, crashGuard);
+    } else {
+      await composeAndSend(page, crashGuard);
+    }
     await inspect(page, "after_send_attempt");
 
     const postSendChallenge = await detectGoogleFriction(page, crashGuard);
@@ -116,6 +127,54 @@ async function main() {
   if (finalStatus !== "send_attempt_completed") {
     process.exitCode = 2;
   }
+}
+
+async function composeAndSendHtml(page: Page, crashGuard: CrashGuard) {
+  log("send_step", { step: "html_mode_waiting_for_controls" });
+  await captureStep(page, "04-html-before-controls", crashGuard);
+
+  await crashGuard.wait(
+    "html_wait_for_compose_link",
+    page.waitForSelector("a[href*='&v=b'], a[href*='v=b'], input[name='nvp_bu_send']", { state: "attached", timeout: 30_000 }),
+  );
+  await captureStep(page, "05-html-controls-attached", crashGuard);
+
+  const composeLink = page.locator("a[href*='&v=b'], a[href*='v=b']").first();
+  if (await crashGuard.wait("html_compose_link_visible", composeLink.isVisible({ timeout: 5_000 }).catch(() => false))) {
+    await crashGuard.wait("html_compose_click", composeLink.click({ timeout: 10_000 }));
+  }
+
+  await crashGuard.wait(
+    "html_compose_form",
+    page.waitForSelector("textarea[name='body'], input[name='to'], textarea[name='to'], input[name='subject']", {
+      state: "attached",
+      timeout: 30_000,
+    }),
+  );
+  await captureStep(page, "06-html-compose-form", crashGuard);
+
+  await fillFirst(page, crashGuard, ["textarea[name='to']", "input[name='to']", "textarea[name='to_addrs']", "input[name='to_addrs']"], to, "html_fill_to");
+  await fillFirst(page, crashGuard, ["input[name='subject']", "input[name='subj']"], subject, "html_fill_subject");
+  await fillFirst(page, crashGuard, ["textarea[name='body']", "textarea[name='msgbody']"], body, "html_fill_body");
+  await captureStep(page, "07-html-draft-filled", crashGuard);
+
+  const sendButton = page.locator("input[name='nvp_bu_send'], input[type='submit'][value='Send'], input[type='submit'][value='Send »']").first();
+  await crashGuard.wait("html_send_click", sendButton.click({ timeout: 15_000 }));
+  log("send_step", { step: "html_send_clicked" });
+  await captureStep(page, "08-html-send-clicked", crashGuard);
+  await crashGuard.wait("html_after_send_settle", page.waitForTimeout(5_000));
+  await captureStep(page, "09-html-after-send-settle", crashGuard);
+}
+
+async function fillFirst(page: Page, crashGuard: CrashGuard, selectors: string[], value: string, label: string) {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    if (await crashGuard.wait(`${label}:${selector}:visible`, locator.isVisible({ timeout: 2_000 }).catch(() => false))) {
+      await crashGuard.wait(`${label}:${selector}:fill`, locator.fill(value, { timeout: 10_000 }));
+      return;
+    }
+  }
+  throw new Error(`Could not find field for ${label}; tried ${selectors.join(", ")}`);
 }
 
 async function composeAndSend(page: Page, crashGuard: CrashGuard) {
