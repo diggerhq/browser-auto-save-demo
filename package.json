@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx src/server.ts",
     "gmail:headless": "tsx src/gmail-headless-send.ts",
+    "gmail:patch-profile": "tsx src/gmail-patch-profile.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

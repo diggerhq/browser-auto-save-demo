@@ -80,6 +80,24 @@ This uses the Browser API update route. If that route is unavailable in the
 current environment, the script fails early with the HTTP response so the
 limitation is explicit.
 
+You can also try repairing the profile's restored tabs by loading the profile,
+opening a lightweight Gmail URL, closing any restored tabs, and deleting the
+browser to save the new tab state:
+
+```bash
+GMAIL_PROFILE_NAME=gmail-demo GMAIL_PATCH_URL=https://mail.google.com/mail/u/0/h/ npm run gmail:patch-profile
+```
+
+Then retry:
+
+```bash
+GMAIL_MODE=html GMAIL_PROFILE_NAME=gmail-demo GMAIL_TO=mo@digger.dev npm run gmail:headless
+```
+
+This is best-effort. If the restored Gmail tab crashes the renderer before the
+patch page can be opened, profile repair needs server/provider support to clear
+saved tabs without first launching them.
+
 Artifacts are written to `artifacts/gmail-headless/` by default:
 
 - `events.json` with page URLs, titles, challenge detection, and browser lifecycle
