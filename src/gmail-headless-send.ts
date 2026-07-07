@@ -64,16 +64,16 @@ async function main() {
   });
   log("browser_start", { id: browser.id, headless: browser.headless, startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl });
 
-  if (attachProfileAfterStart) {
-    await attachProfile(browser.id, profile.id);
-  }
-
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   let page: Page | null = null;
   let pageCrashed = false;
   let finalStatus = "unknown";
 
   try {
+    if (attachProfileAfterStart) {
+      await attachProfile(browser.id, profile.id);
+    }
+
     pwBrowser = await chromium.connectOverCDP(browser.cdpWsUrl);
     const context = pwBrowser.contexts()[0] || await pwBrowser.newContext();
     page = context.pages()[0] || await context.newPage();
