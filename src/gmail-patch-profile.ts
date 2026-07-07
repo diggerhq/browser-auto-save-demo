@@ -57,9 +57,31 @@ async function main() {
     }
 
     const patchPage = await context.newPage();
-    patchPage.on("crash", () => log("page_crash", { role: "patch", url: safePageUrl(patchPage) }));
-    await patchPage.goto(patchUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await patchPage.waitForTimeout(3_000);
+    let patchPageCrashed = false;
+    patchPage.on("crash", () => {
+      patchPageCrashed = true;
+      log("page_crash", { role: "patch", url: safePageUrl(patchPage) });
+    });
+    await patchPage.goto(patchUrl, { waitUntil: "domcontentloaded", timeout: 60_000 }).catch((err) => {
+      log("patch_goto_error", { url: patchUrl, message: String(err) });
+    });
+    if (patchPageCrashed) {
+      log("profile_patch", {
+        result: "failed_restored_tab_crashed",
+        note: "Profile restored the crashing Gmail tab before the patch URL could be saved.",
+      });
+      return;
+    }
+    await patchPage.waitForTimeout(3_000).catch((err) => {
+      log("patch_wait_error", { message: String(err) });
+    });
+    if (patchPageCrashed) {
+      log("profile_patch", {
+        result: "failed_restored_tab_crashed",
+        note: "Patch page crashed before restored tabs could be closed.",
+      });
+      return;
+    }
     await inspect(patchPage, "patch_page_loaded");
     await capture(patchPage, "patch-page-loaded");
 
