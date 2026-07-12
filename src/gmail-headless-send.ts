@@ -37,14 +37,29 @@ const defaultGmailTargetUrl = gmailMode === "html"
 const gmailTargetUrl = process.env.GMAIL_TARGET_URL || defaultGmailTargetUrl;
 const attachProfileAfterStart = process.env.GMAIL_ATTACH_PROFILE_AFTER_START === "1";
 const disableRestoreTabs = process.env.GMAIL_DISABLE_RESTORE_TABS === "1";
+const headless = process.env.GMAIL_HEADLESS === "1";
 const stealth = process.env.GMAIL_STEALTH === "0" ? false : true;
+const telemetry = process.env.GMAIL_TELEMETRY === "0" ? null : { enabled: true };
 const events: LogEvent[] = [];
 
 async function main() {
   requiredEnv("OPENCOMPUTER_API_KEY");
   await mkdir(artifactDir, { recursive: true });
 
-  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl, attachProfileAfterStart, disableRestoreTabs, stealth });
+  log("input", {
+    profileName,
+    to,
+    subject,
+    artifactDir,
+    gmailMode,
+    gmailStartUrl,
+    gmailTargetUrl,
+    attachProfileAfterStart,
+    disableRestoreTabs,
+    headless,
+    stealth,
+    telemetry,
+  });
 
   const profile = await BrowserProfile.connect(profileName);
   log("profile", {
@@ -55,8 +70,9 @@ async function main() {
   });
 
   const createBody = {
-    headless: true,
+    headless,
     stealth,
+    telemetry,
     timeout_seconds: 300,
     start_url: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
     tags: { demo: "gmail-headless-send" },
@@ -76,8 +92,9 @@ async function main() {
   const browser = disableRestoreTabs
     ? await createBrowserRaw(createBody)
     : await Browser.create({
-      headless: true,
+      headless,
       stealth,
+      telemetry,
       timeoutSeconds: 300,
       startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
       tags: { demo: "gmail-headless-send" },
@@ -88,7 +105,13 @@ async function main() {
         },
       }),
     });
-  log("browser_start", { id: browser.id, headless: browser.headless, startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl });
+  log("browser_start", {
+    id: browser.id,
+    headless: browser.headless,
+    stealth: browser.stealth,
+    liveViewUrl: browser.liveViewUrl,
+    startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
+  });
 
   let pwBrowser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   let page: Page | null = null;

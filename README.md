@@ -35,12 +35,12 @@ There is no `Save Auth` button. The important implementation detail is that
 the managed browser must be deleted or allowed to time out; closing only a
 Playwright page/browser is not enough to persist the profile.
 
-## Headless Gmail Challenge Screenshot Test
+## Gmail Send And Debug Test
 
 This repo also includes a deliberately best-effort Gmail web-UI send test. It
-uses a saved profile in headless mode, attempts to compose and send one email,
-and writes screenshots/HTML/logs when Google shows sign-in, captcha, or account
-security friction.
+uses a saved profile, opens a headful browser by default, attempts to compose
+and send one email, and writes screenshots/HTML/logs when Google shows sign-in,
+captcha, account security friction, or a page crash.
 
 Configure `.env`:
 
@@ -50,10 +50,14 @@ GMAIL_PROFILE_NAME=scout-digger:sgp_test:684a2b2ca18a1424:google
 GMAIL_TO=mo@digger.dev
 GMAIL_SUBJECT=Hi Mo!
 GMAIL_BODY=Who are you rooting for in the World Cup?
-# Optional: use Gmail's basic HTML UI instead of the heavier JS UI.
+# Recommended: request Gmail's basic HTML URL; Gmail may redirect to modern Gmail.
 GMAIL_MODE=html
-# Optional: load the saved profile on a blank page before navigating to Gmail.
+# Recommended: load the saved profile on a blank page before navigating to Gmail.
 GMAIL_START_URL=about:blank
+# Defaults: headful browser, stealth enabled, Kernel telemetry requested.
+GMAIL_HEADLESS=0
+GMAIL_STEALTH=1
+GMAIL_TELEMETRY=1
 # Optional: send experimental raw create fields to ask the provider not to restore saved tabs.
 GMAIL_DISABLE_RESTORE_TABS=1
 # Optional: start a blank browser first, then attach the profile to avoid restored Gmail tabs.
@@ -66,18 +70,18 @@ Run:
 npm run gmail:headless
 ```
 
-For accounts where the full Gmail JavaScript inbox crashes in headless mode,
-try:
+Despite the script name, this runs headful by default. To force headless for an
+A/B test, set:
 
 ```bash
-GMAIL_MODE=html npm run gmail:headless
+GMAIL_HEADLESS=1 npm run gmail:headless
 ```
 
 If the saved profile restores a heavy Gmail inbox tab before the script can
 navigate, try starting blank and attaching the profile after browser creation:
 
 ```bash
-GMAIL_MODE=html GMAIL_ATTACH_PROFILE_AFTER_START=1 npm run gmail:headless
+GMAIL_MODE=html GMAIL_START_URL=about:blank GMAIL_ATTACH_PROFILE_AFTER_START=1 npm run gmail:headless
 ```
 
 This uses the Browser API update route. If that route is unavailable in the
@@ -88,7 +92,7 @@ To test whether the Browser API accepts an explicit no-restore-tabs create
 option, run:
 
 ```bash
-GMAIL_MODE=html GMAIL_DISABLE_RESTORE_TABS=1 GMAIL_PROFILE_NAME=gmail-demo GMAIL_TO=mo@digger.dev npm run gmail:headless
+GMAIL_MODE=html GMAIL_START_URL=about:blank GMAIL_DISABLE_RESTORE_TABS=1 GMAIL_PROFILE_NAME=gmail-demo GMAIL_TO=mo@digger.dev npm run gmail:headless
 ```
 
 This intentionally bypasses the SDK body mapper and sends experimental raw
@@ -100,7 +104,7 @@ To distinguish profile startup crashes from Gmail navigation crashes, start the
 profile on a blank page first:
 
 ```bash
-GMAIL_START_URL=about:blank GMAIL_MODE=html GMAIL_PROFILE_NAME=gmail-demo GMAIL_TO=mo@digger.dev npm run gmail:headless
+GMAIL_START_URL=about:blank GMAIL_MODE=html GMAIL_HEADLESS=0 GMAIL_STEALTH=1 GMAIL_PROFILE_NAME=gmail-demo GMAIL_TO=mo@digger.dev npm run gmail:headless
 ```
 
 You can also try repairing the profile's restored tabs by loading the profile,
