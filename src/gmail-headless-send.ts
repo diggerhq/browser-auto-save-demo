@@ -31,18 +31,20 @@ const defaultGmailStartUrl = gmailMode === "html"
   ? "https://mail.google.com/mail/u/0/h/"
   : "https://mail.google.com/";
 const gmailStartUrl = process.env.GMAIL_START_URL || defaultGmailStartUrl;
-const gmailTargetUrl = gmailMode === "html"
+const defaultGmailTargetUrl = gmailMode === "html"
   ? "https://mail.google.com/mail/u/0/h/"
   : "https://mail.google.com/mail/u/0/#inbox";
+const gmailTargetUrl = process.env.GMAIL_TARGET_URL || defaultGmailTargetUrl;
 const attachProfileAfterStart = process.env.GMAIL_ATTACH_PROFILE_AFTER_START === "1";
 const disableRestoreTabs = process.env.GMAIL_DISABLE_RESTORE_TABS === "1";
+const stealth = process.env.GMAIL_STEALTH === "0" ? false : true;
 const events: LogEvent[] = [];
 
 async function main() {
   requiredEnv("OPENCOMPUTER_API_KEY");
   await mkdir(artifactDir, { recursive: true });
 
-  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl, attachProfileAfterStart, disableRestoreTabs });
+  log("input", { profileName, to, subject, artifactDir, gmailMode, gmailStartUrl, gmailTargetUrl, attachProfileAfterStart, disableRestoreTabs, stealth });
 
   const profile = await BrowserProfile.connect(profileName);
   log("profile", {
@@ -54,7 +56,7 @@ async function main() {
 
   const createBody = {
     headless: true,
-    stealth: true,
+    stealth,
     timeout_seconds: 300,
     start_url: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
     tags: { demo: "gmail-headless-send" },
@@ -75,7 +77,7 @@ async function main() {
     ? await createBrowserRaw(createBody)
     : await Browser.create({
       headless: true,
-      stealth: true,
+      stealth,
       timeoutSeconds: 300,
       startUrl: attachProfileAfterStart ? "about:blank" : gmailStartUrl,
       tags: { demo: "gmail-headless-send" },
@@ -122,9 +124,12 @@ async function main() {
       return;
     }
 
-    if (gmailMode === "html") {
+    if (gmailMode === "html" && isBasicHtmlGmail(page)) {
       await composeAndSendHtml(page, crashGuard);
     } else {
+      if (gmailMode === "html") {
+        log("send_step", { step: "html_mode_redirected_to_modern_gmail", url: page.url() });
+      }
       await composeAndSend(page, crashGuard);
     }
     await inspect(page, "after_send_attempt");
@@ -385,6 +390,11 @@ function safePageUrl(page: Page) {
   } catch {
     return "";
   }
+}
+
+function isBasicHtmlGmail(page: Page) {
+  const url = page.url();
+  return /\/mail\/u\/\d+\/h\//.test(url) || /\/mail\/h\//.test(url);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
